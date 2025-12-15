@@ -14,11 +14,15 @@ import matplotlib.pyplot as plt
 
 
 def load_data():
-    """Load data from the CSV files referundum/regions/departments."""
-    referendum = pd.DataFrame({})
+    """Load data from the CSV files referundum/regions/departments.
+     referendum = pd.DataFrame({})
     regions = pd.DataFrame({})
     departments = pd.DataFrame({})
-
+    """
+    referendum = pd.read_csv("data/referendum.csv", sep = ";")
+    regions = pd.read_csv("data/regions.csv")
+    departments = pd.read_csv("data/departments.csv") 
+    
     return referendum, regions, departments
 
 
@@ -28,8 +32,26 @@ def merge_regions_and_departments(regions, departments):
     The columns in the final DataFrame should be:
     ['code_reg', 'name_reg', 'code_dep', 'name_dep']
     """
+    merged = departments.merge(
+        regions,
+        left_on="region_code",
+        right_on="code",
+        how="inner",
+        suffixes=("_dep", "_reg"),
+    )
 
-    return pd.DataFrame({})
+    # select and rename columns
+    merged = merged.rename(
+        columns={
+            "code_reg": "code_reg",
+            "name_reg": "name_reg",
+            "code_dep": "code_dep",
+            "name_dep": "name_dep",
+        }
+    )
+
+    return merged[["code_reg", "name_reg", "code_dep", "name_dep"]]
+   # return pd.DataFrame({})
 
 
 def merge_referendum_and_areas(referendum, regions_and_departments):
@@ -41,8 +63,32 @@ def merge_referendum_and_areas(referendum, regions_and_departments):
     DOM-TOM-COM departments are departements that are remote from metropolitan
     France, like Guadaloupe, Reunion, or Tahiti.
     """
+    
+      # 1.copy and avoid SettingWithCopy
+    referendum = referendum.copy()
 
-    return pd.DataFrame({})
+    # 2. Department codes should be formatted as strings and padded with two digits
+    referendum["Department code"] = (
+        referendum["Department code"]
+        .astype(str)
+        .str.zfill(2)
+    )
+
+    # 3. Delete DOM-TOM / abroad (starting with Z)
+    referendum = referendum[
+        ~referendum["Department code"].str.startswith("Z")
+    ]
+
+    # 4. inner merge（won't generate NaN）
+    merged = referendum.merge(
+        regions_and_departments,
+        left_on="Department code",
+        right_on="code_dep",
+        how="inner",
+    )
+
+    return merged
+    # return pd.DataFrame({})
 
 
 def compute_referendum_result_by_regions(referendum_and_areas):
@@ -51,8 +97,17 @@ def compute_referendum_result_by_regions(referendum_and_areas):
     The return DataFrame should be indexed by `code_reg` and have columns:
     ['name_reg', 'Registered', 'Abstentions', 'Null', 'Choice A', 'Choice B']
     """
+    # sum numeric results by region
+    grouped = referendum_and_areas.groupby("code_reg").sum(numeric_only=True)
 
-    return pd.DataFrame({})
+    # keep region name
+    grouped["name_reg"] = (referendum_and_areas.groupby("code_reg")["name_reg"].first())
+
+    # select and order columns
+    grouped = grouped[["name_reg", "Registered", "Abstentions", "Null", "Choice A", "Choice B"]]
+
+    return grouped
+   # return pd.DataFrame({})
 
 
 def plot_referendum_map(referendum_result_by_regions):
@@ -64,8 +119,28 @@ def plot_referendum_map(referendum_result_by_regions):
       should display the rate of 'Choice A' over all expressed ballots.
     * Return a gpd.GeoDataFrame with a column 'ratio' containing the results.
     """
+    # load geographic data
+    gdf_regions = gpd.read_file("data/regions.geojson",engine="pyogrio")
 
-    return gpd.GeoDataFrame({})
+    # transfer index to column for merge
+    results = referendum_result_by_regions.reset_index()
+
+    # merge geographic data with referendum results
+    gdf = gdf_regions.merge(
+        results,
+        left_on="code",
+        right_on="code_reg",
+        how="left",
+    )
+
+    # compute ratio of Choice A over expressed ballots
+    gdf["ratio"] = gdf["Choice A"] / (gdf["Choice A"] + gdf["Choice B"])
+
+    # plot 
+    gdf.plot(column="ratio", legend=True)
+
+    return gdf
+    # return gpd.GeoDataFrame({})
 
 
 if __name__ == "__main__":
